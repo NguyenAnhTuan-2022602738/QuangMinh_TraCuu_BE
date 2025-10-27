@@ -12,13 +12,14 @@ if (process.env.NODE_ENV !== 'production') {
 const app = express();
 
 // Middleware
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(bodyParser.json({ limit: '50mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '50mb' }));
 // Cấu hình CORS cho phép kết nối từ bất kỳ nguồn nào
 app.use(cors({
-    origin: '*',
+    origin: ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000', 'http://127.0.0.1:3001'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true
 }));
 
 // Database connection helper (invoked by server entrypoints)

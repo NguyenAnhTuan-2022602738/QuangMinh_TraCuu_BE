@@ -37,7 +37,9 @@ const createProduct = async (req, res) => {
         const productData = {
             code: req.body.code,
             name: req.body.name,
-            category: req.body.category,
+            parentCategory: req.body.parentCategory || req.body.category, // Support both new and old field
+            subcategory: req.body.subcategory || req.body.category || 'Chưa phân loại',
+            category: req.body.category, // Keep for backward compatibility
             unit: req.body.unit,
             prices: {
                 BBCL: req.body.BBCL || 0,
@@ -70,6 +72,8 @@ const updateProduct = async (req, res) => {
         // Xử lý các trường cơ bản
         if (req.body.code) updateData.code = req.body.code;
         if (req.body.name) updateData.name = req.body.name;
+        if (req.body.parentCategory) updateData.parentCategory = req.body.parentCategory;
+        if (req.body.subcategory) updateData.subcategory = req.body.subcategory;
         if (req.body.category) updateData.category = req.body.category;
         if (req.body.unit) updateData.unit = req.body.unit;
         
@@ -130,19 +134,26 @@ const bulkCreateProducts = async (req, res) => {
         }
 
         // Chuyển đổi dữ liệu để khớp với schema
-        const formattedProducts = products.map(p => ({
-            code: p.code,
-            name: p.name,
-            category: p.category,
-            unit: p.unit,
-            prices: {
-                BBCL: p.BBCL || 0,
-                BBPT: p.BBPT || 0,
-                BL: p.BL || 0, 
-                BLVIP: p.BLVIP || 0,
-                honda247: p.HONDA247 || 0
-            }
-        }));
+        const formattedProducts = products.map(p => {
+            const parentCat = p.parentCategory || p.category || 'Chưa phân loại';
+            const subCat = p.subcategory || p.category || 'Chưa phân loại';
+            
+            return {
+                code: p.code,
+                name: p.name,
+                parentCategory: parentCat,
+                subcategory: subCat,
+                category: p.category || parentCat,  // For backward compatibility
+                unit: p.unit,
+                prices: {
+                    BBCL: p.BBCL || 0,
+                    BBPT: p.BBPT || 0,
+                    BL: p.BL || 0, 
+                    BLVIP: p.BLVIP || 0,
+                    honda247: p.HONDA247 || 0
+                }
+            };
+        });
 
         console.log('Importing products:', JSON.stringify(formattedProducts.slice(0, 2), null, 2));
 
@@ -150,10 +161,19 @@ const bulkCreateProducts = async (req, res) => {
         const result = await Product.insertMany(formattedProducts, { ordered: false })
             .catch(err => {
                 // Handle duplicate key errors
-                console.error('Import error:', err.message);
+                console.error('Import error details:', {
+                    message: err.message,
+                    code: err.code,
+                    writeErrors: err.writeErrors?.length,
+                    insertedDocs: err.insertedDocs?.length,
+                    errors: err.errors
+                });
+                
                 if (err.writeErrors && err.insertedDocs) {
+                    console.log(`Inserted ${err.insertedDocs.length} products despite errors`);
                     return { insertedCount: err.insertedDocs.length };
                 } else if (err.code === 11000) {
+                    console.log('Duplicate key error');
                     return { insertedCount: err.result?.nInserted || 0 };
                 }
                 throw err;
@@ -169,25 +189,36 @@ const bulkCreateProducts = async (req, res) => {
     }
 };
 
-// Export the controller functions
-module.exports = {
-    getProductByCode,
-    getAllProducts,
-    getProductsByPriceType,
-    createProduct,
-    updateProduct,
-    deleteProduct,
-    bulkCreateProducts,
-};
-
 // Return products with price according to priceType
 async function getProductsByPriceType(req, res) {
     try {
         const { priceType } = req.params;
-        const normalized = String(priceType).toUpperCase();
+    const normalized = String(priceType).toUpperCase();
         const allowed = ['BBCL', 'BBPT', 'BL', 'BLVIP', 'HONDA247'];
         if (!allowed.includes(normalized)) {
             return res.status(400).json({ message: 'Invalid price type', allowed });
+        }
+
+        // Access control: if request has a JWT, check allowedPriceTypes for customer tokens
+        const authHeader = req.header('Authorization');
+        if (authHeader) {
+            const token = authHeader.replace('Bearer ', '');
+            try {
+                const jwt = require('jsonwebtoken');
+                const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+                // If token is admin, allow
+                if (decoded.role === 'admin') {
+                    // proceed
+                } else if (decoded.role === 'customer') {
+                    const allowedTypes = (decoded.allowedPriceTypes || []).map(s => String(s).toUpperCase());
+                    if (!allowedTypes.includes(normalized)) {
+                        return res.status(403).json({ message: 'Tài khoản không có quyền xem bảng giá này' });
+                    }
+                }
+            } catch (err) {
+                // Ignore token errors here; we'll still allow unauthenticated public access if desired
+                console.warn('Token verify error in priceType route:', err.message);
+            }
         }
 
         // Select both nested prices and possible top-level price fields
@@ -238,3 +269,86 @@ async function getProductsByPriceType(req, res) {
         res.status(500).json({ message: 'Server error', error });
     }
 }
+
+// Get all parent categories
+const getParentCategories = async (req, res) => {
+    try {
+        // Return simple array of category names
+        const categories = await Product.distinct('parentCategory');
+        res.status(200).json(categories);
+    } catch (error) {
+        res.status(500).json({ message: 'Server error', error });
+    }
+};
+
+// Get products by parent category with optional subcategory filter
+const getProductsByParentCategory = async (req, res) => {
+    try {
+        const { parentCategory } = req.params;
+        const { subcategory, priceType } = req.query;
+        
+        const filter = { parentCategory };
+        if (subcategory) {
+            filter.subcategory = subcategory;
+        }
+        
+        const products = await Product.find(filter).lean();
+        
+        // If priceType is specified, format response like getProductsByPriceType
+        if (priceType) {
+            const normalized = String(priceType).toUpperCase();
+            const mapped = products.map(p => {
+                let price = null;
+                if (p.prices && p.prices[normalized] != null) {
+                    price = p.prices[normalized];
+                } else if (p.prices && normalized === 'HONDA247' && p.prices.honda247 != null) {
+                    price = p.prices.honda247;
+                } else if (p[normalized] != null) {
+                    price = p[normalized];
+                } else if (normalized === 'HONDA247' && p.honda247 != null) {
+                    price = p.honda247;
+                }
+                
+                return {
+                    code: p.code,
+                    name: p.name,
+                    parentCategory: p.parentCategory,
+                    subcategory: p.subcategory,
+                    category: p.category,
+                    unit: p.unit,
+                    price,
+                };
+            });
+            return res.status(200).json(mapped);
+        }
+        
+        res.status(200).json(products);
+    } catch (error) {
+        res.status(500).json({ message: 'Server error', error });
+    }
+};
+
+// Get subcategories for a parent category
+const getSubcategories = async (req, res) => {
+    try {
+        const { parentCategory } = req.params;
+        const subcategories = await Product.distinct('subcategory', { parentCategory });
+        res.status(200).json(subcategories);
+    } catch (error) {
+        res.status(500).json({ message: 'Server error', error });
+    }
+};
+
+// Export all controller functions
+module.exports = {
+    getProductByCode,
+    getAllProducts,
+    getProductsByPriceType,
+    createProduct,
+    updateProduct,
+    deleteProduct,
+    bulkCreateProducts,
+    getParentCategories,
+    getProductsByParentCategory,
+    getSubcategories,
+};

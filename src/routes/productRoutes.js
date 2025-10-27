@@ -6,7 +6,10 @@ const {
     createProduct,
     updateProduct,
     deleteProduct,
-    bulkCreateProducts
+    bulkCreateProducts,
+    getParentCategories,
+    getProductsByParentCategory,
+    getSubcategories
 } = require('../controllers/productController');
 const authMiddleware = require('../middleware/auth');
 
@@ -16,6 +19,15 @@ const router = express.Router();
 
 // Get all products
 router.get('/', getAllProducts);
+
+// Get all parent categories
+router.get('/categories/parent', getParentCategories);
+
+// Get subcategories for a parent category
+router.get('/categories/:parentCategory/subcategories', getSubcategories);
+
+// Get products by parent category (with optional subcategory query param)
+router.get('/categories/:parentCategory/products', getProductsByParentCategory);
 
 // Get product by code
 router.get('/code/:code', getProductByCode);

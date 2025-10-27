@@ -10,13 +10,31 @@ const productSchema = new mongoose.Schema({
         type: String,
         required: true
     },
+    parentCategory: {
+        type: String,
+        required: false,  // Not required for backward compatibility
+        index: true,  // For faster filtering
+        default: 'Chưa phân loại'
+    },
+    subcategory: {
+        type: String,
+        required: false,  // Not required for backward compatibility
+        index: true,
+        default: 'Chưa phân loại'
+    },
+    // Keep old 'category' field for backward compatibility (optional)
     category: {
         type: String,
-        required: true
+        required: false
     },
     unit: {
         type: String,
         required: true
+    },
+    image: {
+        type: String,
+        required: false,
+        default: null
     },
     prices: {
         BBCL: {
