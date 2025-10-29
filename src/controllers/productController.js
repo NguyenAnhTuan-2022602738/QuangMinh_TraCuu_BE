@@ -20,11 +20,29 @@ const getProductByCode = async (req, res) => {
     }
 };
 
-// Fetch all products
+// Fetch all products with pagination
 const getAllProducts = async (req, res) => {
     try {
-        const products = await Product.find();
-        res.status(200).json(products);
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 50;
+        const skip = (page - 1) * limit;
+
+        const totalProducts = await Product.countDocuments();
+        const products = await Product.find().skip(skip).limit(limit);
+
+        const totalPages = Math.ceil(totalProducts / limit);
+
+        res.status(200).json({
+            products,
+            pagination: {
+                currentPage: page,
+                totalPages,
+                totalProducts,
+                productsPerPage: limit,
+                hasNextPage: page < totalPages,
+                hasPrevPage: page > 1
+            }
+        });
     } catch (error) {
         res.status(500).json({ message: 'Server error', error });
     }
@@ -189,11 +207,15 @@ const bulkCreateProducts = async (req, res) => {
     }
 };
 
-// Return products with price according to priceType
+// Return products with price according to priceType with pagination
 async function getProductsByPriceType(req, res) {
     try {
         const { priceType } = req.params;
-    const normalized = String(priceType).toUpperCase();
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 50;
+        const skip = (page - 1) * limit;
+
+        const normalized = String(priceType).toUpperCase();
         const allowed = ['BBCL', 'BBPT', 'BL', 'BLVIP', 'HONDA247'];
         if (!allowed.includes(normalized)) {
             return res.status(400).json({ message: 'Invalid price type', allowed });
@@ -221,7 +243,10 @@ async function getProductsByPriceType(req, res) {
             }
         }
 
-        // Select both nested prices and possible top-level price fields
+        // Get total count for pagination
+        const totalProducts = await Product.countDocuments();
+
+        // Select both nested prices and possible top-level price fields with pagination
         const products = await Product.find({}, {
             code: 1,
             name: 1,
@@ -234,7 +259,7 @@ async function getProductsByPriceType(req, res) {
             BLVIP: 1,
             HONDA247: 1,
             honda247: 1,
-        }).lean();
+        }).skip(skip).limit(limit).lean();
 
         const mapped = products.map(p => {
             let price = null;
@@ -264,7 +289,19 @@ async function getProductsByPriceType(req, res) {
             };
         });
 
-        res.status(200).json(mapped);
+        const totalPages = Math.ceil(totalProducts / limit);
+
+        res.status(200).json({
+            products: mapped,
+            pagination: {
+                currentPage: page,
+                totalPages,
+                totalProducts,
+                productsPerPage: limit,
+                hasNextPage: page < totalPages,
+                hasPrevPage: page > 1
+            }
+        });
     } catch (error) {
         res.status(500).json({ message: 'Server error', error });
     }
@@ -281,19 +318,25 @@ const getParentCategories = async (req, res) => {
     }
 };
 
-// Get products by parent category with optional subcategory filter
+// Get products by parent category with optional subcategory filter and pagination
 const getProductsByParentCategory = async (req, res) => {
     try {
         const { parentCategory } = req.params;
         const { subcategory, priceType } = req.query;
-        
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 50;
+        const skip = (page - 1) * limit;
+
         const filter = { parentCategory };
         if (subcategory) {
             filter.subcategory = subcategory;
         }
-        
-        const products = await Product.find(filter).lean();
-        
+
+        // Get total count for pagination
+        const totalProducts = await Product.countDocuments(filter);
+
+        const products = await Product.find(filter).skip(skip).limit(limit).lean();
+
         // If priceType is specified, format response like getProductsByPriceType
         if (priceType) {
             const normalized = String(priceType).toUpperCase();
@@ -308,7 +351,7 @@ const getProductsByParentCategory = async (req, res) => {
                 } else if (normalized === 'HONDA247' && p.honda247 != null) {
                     price = p.honda247;
                 }
-                
+
                 return {
                     code: p.code,
                     name: p.name,
@@ -319,10 +362,35 @@ const getProductsByParentCategory = async (req, res) => {
                     price,
                 };
             });
-            return res.status(200).json(mapped);
+
+            const totalPages = Math.ceil(totalProducts / limit);
+
+            return res.status(200).json({
+                products: mapped,
+                pagination: {
+                    currentPage: page,
+                    totalPages,
+                    totalProducts,
+                    productsPerPage: limit,
+                    hasNextPage: page < totalPages,
+                    hasPrevPage: page > 1
+                }
+            });
         }
-        
-        res.status(200).json(products);
+
+        const totalPages = Math.ceil(totalProducts / limit);
+
+        res.status(200).json({
+            products,
+            pagination: {
+                currentPage: page,
+                totalPages,
+                totalProducts,
+                productsPerPage: limit,
+                hasNextPage: page < totalPages,
+                hasPrevPage: page > 1
+            }
+        });
     } catch (error) {
         res.status(500).json({ message: 'Server error', error });
     }
