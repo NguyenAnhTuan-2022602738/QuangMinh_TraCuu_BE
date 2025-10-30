@@ -24,8 +24,24 @@ const connectDB = async () => {
                 useNewUrlParser: true,
                 useUnifiedTopology: true,
             })
-            .then((mongooseInstance) => {
+            .then(async (mongooseInstance) => {
                 console.log('MongoDB connected successfully');
+
+                // Attempt to drop legacy non-sparse email index to prevent false duplicate errors
+                try {
+                    const Customer = require('../models/Customer');
+                    const indexes = await Customer.collection.indexes();
+                    const legacyEmailIndex = indexes.find((idx) => idx.key && idx.key.email === 1 && !idx.sparse);
+                    if (legacyEmailIndex) {
+                        await Customer.collection.dropIndex(legacyEmailIndex.name);
+                        console.log('Dropped legacy unique index on Customer.email to allow blank values.');
+                    }
+                } catch (indexErr) {
+                    if (indexErr.codeName !== 'IndexNotFound') {
+                        console.warn('Warning while checking Customer email index:', indexErr.message);
+                    }
+                }
+
                 return mongooseInstance;
             })
             .catch((error) => {

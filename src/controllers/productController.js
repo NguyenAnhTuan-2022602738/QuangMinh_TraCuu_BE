@@ -23,24 +23,40 @@ const getProductByCode = async (req, res) => {
 // Fetch all products with pagination
 const getAllProducts = async (req, res) => {
     try {
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 50;
-        const skip = (page - 1) * limit;
+        const pageParam = parseInt(req.query.page) || 1;
+        const limitParam = req.query.limit;
+        const isAllRequested = String(limitParam).toLowerCase() === 'all';
+
+        let limit;
+        if (isAllRequested) {
+            limit = null;
+        } else {
+            const parsedLimit = parseInt(limitParam, 10);
+            limit = Number.isNaN(parsedLimit) ? 50 : Math.max(parsedLimit, 1);
+        }
 
         const totalProducts = await Product.countDocuments();
-        const products = await Product.find().skip(skip).limit(limit);
+        const skip = limit ? (pageParam - 1) * limit : 0;
 
-        const totalPages = Math.ceil(totalProducts / limit);
+        let query = Product.find();
+        if (limit) {
+            query = query.skip(skip).limit(limit);
+        }
+
+        const products = await query;
+        const totalPages = limit ? Math.max(Math.ceil(totalProducts / limit), 1) : 1;
+        const currentPage = limit ? Math.min(pageParam, totalPages) : 1;
+        const pageSize = limit || totalProducts;
 
         res.status(200).json({
             products,
             pagination: {
-                currentPage: page,
+                currentPage,
                 totalPages,
                 totalProducts,
-                productsPerPage: limit,
-                hasNextPage: page < totalPages,
-                hasPrevPage: page > 1
+                productsPerPage: pageSize,
+                hasNextPage: limit ? currentPage < totalPages : false,
+                hasPrevPage: limit ? currentPage > 1 : false
             }
         });
     } catch (error) {

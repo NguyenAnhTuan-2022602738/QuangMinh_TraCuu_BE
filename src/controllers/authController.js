@@ -37,11 +37,15 @@ exports.createCustomerAccount = async (req, res) => {
             return res.status(400).json({ message: 'Name and phone are required' });
         }
 
-    const username = String(phone).trim();
-    const last3 = username.slice(-3) || '000';
-    // Remove diacritics from name and spaces to create simple temp password
-    const rawName = String(name || '').normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/\s+/g, '');
-    const rawPassword = `${rawName}${last3}`;
+        const username = String(phone).trim();
+        const last3 = username.slice(-3) || '000';
+        // Remove diacritics from name and spaces to create simple temp password
+        const rawName = String(name || '')
+            .normalize('NFD')
+            .replace(/\p{Diacritic}/gu, '')
+            .replace(/\s+/g, '')
+            .toLowerCase();
+        const rawPassword = `${rawName || 'user'}${last3}`;
         const passwordHash = await bcrypt.hash(rawPassword, 10);
 
         // Normalize allowed price types to uppercase and remove invalid/empty entries
@@ -60,9 +64,32 @@ exports.createCustomerAccount = async (req, res) => {
         await newCustomer.save();
 
         // Return the generated password (admin needs to send to user) - note: in production, avoid returning raw password
-        res.status(201).json({ message: 'Tạo tài khoản thành công', username, password: rawPassword });
+        res.status(201).json({
+            message: 'Tạo tài khoản thành công',
+            username,
+            password: rawPassword,
+            customer: {
+                id: newCustomer._id,
+                name: newCustomer.name,
+                phone: newCustomer.phone,
+                username: newCustomer.username,
+                allowedPriceTypes: newCustomer.allowedPriceTypes,
+                createdAt: newCustomer.createdAt
+            }
+        });
     } catch (error) {
         console.error('createCustomerAccount error:', error);
+        if (error.code === 11000) {
+            const keyPattern = Object.keys(error.keyPattern || {});
+            const keyValue = Object.keys(error.keyValue || {});
+            const field = keyValue[0] || keyPattern[0] || 'phone';
+            return res.status(409).json({
+                message: field === 'email'
+                    ? 'Email đã tồn tại trong hệ thống. Vui lòng kiểm tra lại hoặc cập nhật khách hàng cũ.'
+                    : 'Tài khoản đã tồn tại',
+                field,
+            });
+        }
         res.status(500).json({ message: 'Lỗi server', error: error.message });
     }
 };

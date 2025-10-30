@@ -29,6 +29,7 @@ const customerSchema = new mongoose.Schema({
     // legacy fields
     email: {
         type: String,
+        trim: true,
     },
     customerType: {
         type: String,
@@ -38,6 +39,14 @@ const customerSchema = new mongoose.Schema({
         type: Date,
         default: Date.now,
     },
+});
+
+// Remove empty email fields before saving to avoid storing blank strings
+customerSchema.pre('save', function sanitizeEmail(next) {
+    if (!this.email || this.email.trim() === '') {
+        this.email = undefined;
+    }
+    next();
 });
 
 module.exports = mongoose.model('Customer', customerSchema);
