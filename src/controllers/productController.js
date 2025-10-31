@@ -227,9 +227,21 @@ const bulkCreateProducts = async (req, res) => {
 async function getProductsByPriceType(req, res) {
     try {
         const { priceType } = req.params;
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 50;
-        const skip = (page - 1) * limit;
+        const pageParam = parseInt(req.query.page, 10) || 1;
+        const limitParamRaw = req.query.limit;
+        const isAllRequested = typeof limitParamRaw === 'string' && limitParamRaw.toLowerCase() === 'all';
+
+        let limit;
+        if (isAllRequested) {
+            limit = null;
+        } else if (limitParamRaw === undefined) {
+            limit = 50;
+        } else {
+            const parsedLimit = parseInt(limitParamRaw, 10);
+            limit = Number.isNaN(parsedLimit) ? 50 : Math.max(parsedLimit, 1);
+        }
+
+        const skip = limit ? (pageParam - 1) * limit : 0;
 
         const normalized = String(priceType).toUpperCase();
         const allowed = ['BBCL', 'BBPT', 'BL', 'BLVIP', 'HONDA247'];
@@ -263,11 +275,14 @@ async function getProductsByPriceType(req, res) {
         const totalProducts = await Product.countDocuments();
 
         // Select both nested prices and possible top-level price fields with pagination
-        const products = await Product.find({}, {
+        let productsQuery = Product.find({}, {
             code: 1,
             name: 1,
             category: 1,
+            parentCategory: 1,
+            subcategory: 1,
             unit: 1,
+            image: 1,
             prices: 1,
             BBCL: 1,
             BBPT: 1,
@@ -275,7 +290,13 @@ async function getProductsByPriceType(req, res) {
             BLVIP: 1,
             HONDA247: 1,
             honda247: 1,
-        }).skip(skip).limit(limit).lean();
+        });
+
+        if (limit) {
+            productsQuery = productsQuery.skip(skip).limit(limit);
+        }
+
+        const products = await productsQuery.lean();
 
         const mapped = products.map(p => {
             let price = null;
@@ -299,23 +320,28 @@ async function getProductsByPriceType(req, res) {
             return {
                 code: p.code,
                 name: p.name,
+                parentCategory: p.parentCategory,
+                subcategory: p.subcategory,
                 category: p.category,
                 unit: p.unit,
                 price,
+                image: p.image,
             };
         });
 
-        const totalPages = Math.ceil(totalProducts / limit);
+        const totalPages = limit ? Math.max(Math.ceil(totalProducts / limit), 1) : 1;
+        const currentPage = limit ? Math.min(pageParam, totalPages) : 1;
+        const pageSize = limit || totalProducts;
 
         res.status(200).json({
             products: mapped,
             pagination: {
-                currentPage: page,
+                currentPage,
                 totalPages,
                 totalProducts,
-                productsPerPage: limit,
-                hasNextPage: page < totalPages,
-                hasPrevPage: page > 1
+                productsPerPage: pageSize,
+                hasNextPage: limit ? currentPage < totalPages : false,
+                hasPrevPage: limit ? currentPage > 1 : false
             }
         });
     } catch (error) {
