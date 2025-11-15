@@ -3,6 +3,7 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const productRoutes = require('./routes/productRoutes');
 const authRoutes = require('./routes/authRoutes');
+const promotionRoutes = require('./routes/promotionRoutes');
 const errorHandler = require('./middleware/errorHandler');
 
 if (process.env.NODE_ENV !== 'production') {
@@ -29,6 +30,7 @@ const connectDB = require('./config/db');
 // Routes
 app.use('/api/products', productRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/promotion', promotionRoutes);
 
 // Error handling middleware
 app.use(errorHandler);

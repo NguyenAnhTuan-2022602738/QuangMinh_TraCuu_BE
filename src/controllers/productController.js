@@ -3,6 +3,8 @@
 const Product = require('../models/Product');
 const PriceMatrix = require('../models/PriceMatrix');
 
+const escapeRegex = (value = '') => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 // Fetch product details by product code
 const getProductByCode = async (req, res) => {
     try {
@@ -226,10 +228,11 @@ const bulkCreateProducts = async (req, res) => {
 // Return products with price according to priceType with pagination
 async function getProductsByPriceType(req, res) {
     try {
-        const { priceType } = req.params;
-        const pageParam = parseInt(req.query.page, 10) || 1;
-        const limitParamRaw = req.query.limit;
-        const isAllRequested = typeof limitParamRaw === 'string' && limitParamRaw.toLowerCase() === 'all';
+    const { priceType } = req.params;
+    const pageParam = parseInt(req.query.page, 10) || 1;
+    const limitParamRaw = req.query.limit;
+    const isAllRequested = typeof limitParamRaw === 'string' && limitParamRaw.toLowerCase() === 'all';
+    const searchTerm = (req.query.search || '').trim();
 
         let limit;
         if (isAllRequested) {
@@ -271,11 +274,28 @@ async function getProductsByPriceType(req, res) {
             }
         }
 
+        const baseFilter = {};
+
+        if (searchTerm) {
+            const regex = new RegExp(escapeRegex(searchTerm), 'i');
+            baseFilter.$or = [
+                { code: regex },
+                { name: regex },
+                { category: regex },
+                { parentCategory: regex },
+                { subcategory: regex },
+            ];
+        }
+
         // Get total count for pagination
-        const totalProducts = await Product.countDocuments();
+        let totalQuery = Product.countDocuments(baseFilter);
+        if (searchTerm) {
+            totalQuery = totalQuery.collation({ locale: 'vi', strength: 1 });
+        }
+        const totalProducts = await totalQuery;
 
         // Select both nested prices and possible top-level price fields with pagination
-        let productsQuery = Product.find({}, {
+        let productsQuery = Product.find(baseFilter, {
             code: 1,
             name: 1,
             category: 1,
@@ -291,6 +311,10 @@ async function getProductsByPriceType(req, res) {
             HONDA247: 1,
             honda247: 1,
         });
+
+        if (searchTerm) {
+            productsQuery = productsQuery.collation({ locale: 'vi', strength: 1 });
+        }
 
         if (limit) {
             productsQuery = productsQuery.skip(skip).limit(limit);
@@ -365,6 +389,7 @@ const getProductsByParentCategory = async (req, res) => {
     try {
         const { parentCategory } = req.params;
         const { subcategory, priceType } = req.query;
+        const searchTerm = (req.query.search || '').trim();
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 50;
         const skip = (page - 1) * limit;
@@ -374,10 +399,28 @@ const getProductsByParentCategory = async (req, res) => {
             filter.subcategory = subcategory;
         }
 
-        // Get total count for pagination
-        const totalProducts = await Product.countDocuments(filter);
+        if (searchTerm) {
+            const regex = new RegExp(escapeRegex(searchTerm), 'i');
+            filter.$or = [
+                { code: regex },
+                { name: regex },
+                { category: regex },
+                { subcategory: regex },
+            ];
+        }
 
-        const products = await Product.find(filter).skip(skip).limit(limit).lean();
+        // Get total count for pagination
+        let totalQuery = Product.countDocuments(filter);
+        if (searchTerm) {
+            totalQuery = totalQuery.collation({ locale: 'vi', strength: 1 });
+        }
+        const totalProducts = await totalQuery;
+
+        let productsQuery = Product.find(filter).skip(skip).limit(limit);
+        if (searchTerm) {
+            productsQuery = productsQuery.collation({ locale: 'vi', strength: 1 });
+        }
+        const products = await productsQuery.lean();
 
         // If priceType is specified, format response like getProductsByPriceType
         if (priceType) {
